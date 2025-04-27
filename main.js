@@ -20,13 +20,13 @@ const config = {
 };
 
 const game = new Phaser.Game(config);
-let runner, gridLayer, cursors, dpad, hudText, dataNodes, drones, dataNodesCollected = 0, gameState = 'playing';
+let runner, gridLayer, cursors, dpad, hudText, dataNodes, drones, dataNodesCollected = 0, gameState = 'menu';
 let dpadDirection = '';
 let bgm, moveSound, nodeSound, gameOverSound, victorySound;
 let victoryScreen, gameOverScreen, restartButton, muteButton, restartText;
 let isMuted = false;
 let moveLock = false; // Add a lock for debounced movement
-let totalDataNodes = 10; // Track total number of data nodes
+let totalDataNodes = 10; // Track total number of data nodes (will be set per level)
 let moveInterval = null; // Timer for continuous movement
 let bullets; // Group for bullets
 let lastFired = 0; // For fire rate limiting
@@ -41,11 +41,31 @@ let dronesRemaining = 0; // Track number of drones remaining
 let droneEliminatedMsg = null; // Reference to the popup message
 let victorySpaceListener = null; // Reference for space bar listener on victory screen
 
+// Level system
+let level = 1;
+const maxLevel = 5;
+const levels = [
+    { dataNodes: 8, droneCount: 6, droneMoveDelay: 600 },
+    { dataNodes: 10, droneCount: 8, droneMoveDelay: 500 },
+    { dataNodes: 12, droneCount: 10, droneMoveDelay: 400 },
+    { dataNodes: 15, droneCount: 12, droneMoveDelay: 300 },
+    { dataNodes: 18, droneCount: 14, droneMoveDelay: 200 }
+];
+let droneMoveEvent = null;
+let menuScreen = null;
+let menuLevelButtons = [];
+let nextLevelButton = null;
+
 function preload() {
     // No image loading needed for runner
 }
 
 function create() {
+    // If in menu, show menu and return
+    if (gameState === 'menu') {
+        showMenuScreen.call(this);
+        return;
+    }
     // Background (placeholder: dark rectangle with neon cityscape effect)
     this.add.rectangle(400, 300, 800, 600, 0x181828).setDepth(0);
     for (let i = 0; i < 10; i++) {
@@ -90,6 +110,11 @@ function create() {
     runner.setPosition(25 * 32 + 16, 25 * 32 + 16);
     this.physics.world.setBounds(0, 0, 1600, 1600);
 
+    // Set up level parameters
+    const levelConfig = levels[level - 1] || levels[levels.length - 1];
+    totalDataNodes = levelConfig.dataNodes;
+    const droneCount = levelConfig.droneCount;
+
     // Data Nodes (glowing orbs)
     dataNodes = this.physics.add.group();
     let nodePositions = [];
@@ -115,7 +140,7 @@ function create() {
     // Security Drones (cyberpunk drone graphics)
     drones = this.physics.add.group();
     let dronePositions = [];
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < droneCount; i++) {
         let x, y, pos;
         do {
             x = Phaser.Math.Between(0, 49);
@@ -220,9 +245,10 @@ function create() {
     this.physics.add.overlap(runner, dataNodes, collectNode, null, this);
     this.physics.add.overlap(runner, drones, hitDrone, null, this);
 
-    // Drone Movement
-    this.time.addEvent({
-        delay: 500,
+    // Drone Movement (interval based on level)
+    if (droneMoveEvent) droneMoveEvent.remove();
+    droneMoveEvent = this.time.addEvent({
+        delay: levelConfig.droneMoveDelay,
         callback: moveDrones,
         callbackScope: this,
         loop: true
@@ -401,17 +427,87 @@ function isAdjacentToAnyNode(x, y, nodePositions) {
     });
 }
 
+function showMenuScreen() {
+    const scene = this;
+    if (menuScreen) menuScreen.destroy();
+    menuScreen = scene.add.rectangle(400, 300, 800, 600, 0x0033ff, 0.4).setDepth(10).setScrollFactor(0);
+    scene.add.text(400, 120, 'CyberGrid Runner', {
+        fontFamily: 'Orbitron, monospace',
+        fontSize: '48px',
+        color: '#00ffcc',
+        stroke: '#0033ff',
+        strokeThickness: 6
+    }).setOrigin(0.5).setDepth(11).setScrollFactor(0);
+    scene.add.text(400, 200, 'Select Level', {
+        fontFamily: 'Orbitron, monospace',
+        fontSize: '32px',
+        color: '#fff',
+        stroke: '#00bfff',
+        strokeThickness: 3
+    }).setOrigin(0.5).setDepth(11).setScrollFactor(0);
+    // Level buttons
+    menuLevelButtons.forEach(btn => btn.destroy());
+    menuLevelButtons = [];
+    for (let i = 1; i <= maxLevel; i++) {
+        let btn = scene.add.rectangle(300 + (i - 1) * 60, 300, 50, 50, 0x00bfff, 0.8).setDepth(11).setScrollFactor(0).setInteractive();
+        let txt = scene.add.text(300 + (i - 1) * 60, 300, `${i}`, {
+            fontFamily: 'Orbitron, monospace',
+            fontSize: '28px',
+            color: '#fff',
+            stroke: '#0033ff',
+            strokeThickness: 2
+        }).setOrigin(0.5).setDepth(12).setScrollFactor(0);
+        btn.on('pointerdown', () => {
+            level = i;
+            gameState = 'playing';
+            menuScreen.destroy();
+            menuLevelButtons.forEach(b => b.destroy());
+            menuLevelButtons = [];
+            scene.scene.restart();
+        });
+        menuLevelButtons.push(btn, txt);
+    }
+    // Instructions
+    scene.add.text(400, 400, 'Use arrow keys/WASD to move, SPACE to shoot, P to pause', {
+        fontFamily: 'Orbitron, monospace',
+        fontSize: '20px',
+        color: '#00ffcc',
+        stroke: '#0033ff',
+        strokeThickness: 2
+    }).setOrigin(0.5).setDepth(11).setScrollFactor(0);
+}
+
 function showVictoryScreen() {
     victoryScreen = this.add.rectangle(400, 300, 800, 600, 0x00ffff, 0.3).setDepth(4).setScrollFactor(0);
-    this.add.text(400, 250, 'Victory! All Data Nodes Collected', {
+    this.add.text(400, 220, `Level ${level} Complete!`, {
         fontFamily: 'Orbitron, monospace',
         fontSize: '32px',
         color: '#00ffcc',
         stroke: '#0033ff',
         strokeThickness: 4
     }).setOrigin(0.5).setDepth(4).setScrollFactor(0);
-    restartButton = this.add.rectangle(400, 350, 100, 50, 0x0033ff, 0.8).setDepth(4).setScrollFactor(0).setInteractive();
-    restartText = this.add.text(400, 350, 'Restart', {
+    this.add.text(400, 260, 'All Data Nodes Collected', {
+        fontFamily: 'Orbitron, monospace',
+        fontSize: '28px',
+        color: '#00ffcc',
+        stroke: '#0033ff',
+        strokeThickness: 3
+    }).setOrigin(0.5).setDepth(4).setScrollFactor(0);
+    // Next level button (if not last level)
+    if (level < maxLevel) {
+        nextLevelButton = this.add.rectangle(400, 350, 180, 50, 0x00bfff, 0.8).setDepth(4).setScrollFactor(0).setInteractive();
+        this.add.text(400, 350, 'Next Level (Space)', {
+            fontFamily: 'Orbitron, monospace',
+            fontSize: '24px',
+            color: '#fff',
+            stroke: '#00bfff',
+            strokeThickness: 2
+        }).setOrigin(0.5).setDepth(4).setScrollFactor(0);
+        nextLevelButton.on('pointerdown', () => proceedToNextLevel.call(this));
+    }
+    // Restart button
+    restartButton = this.add.rectangle(400, 420, 120, 50, 0x0033ff, 0.8).setDepth(4).setScrollFactor(0).setInteractive();
+    restartText = this.add.text(400, 420, 'Restart', {
         fontFamily: 'Orbitron, monospace',
         fontSize: '24px',
         color: '#fff',
@@ -420,35 +516,40 @@ function showVictoryScreen() {
     }).setOrigin(0.5).setDepth(4).setScrollFactor(0);
     restartButton.on('pointerdown', () => restartGame.call(this));
     victorySound.play();
-    // Add space bar listener for restart
+    // Add space bar listener for next level or restart
     if (!victorySpaceListener) {
         victorySpaceListener = (event) => {
             if (event.code === 'Space' && gameState === 'victory') {
-                restartGame.call(this);
+                if (level < maxLevel) {
+                    proceedToNextLevel.call(this);
+                } else {
+                    restartGame.call(this);
+                }
             }
         };
         window.addEventListener('keydown', victorySpaceListener);
     }
 }
 
-function showGameOverScreen() {
-    gameOverScreen = this.add.rectangle(400, 300, 800, 600, 0xff3333, 0.3).setDepth(4).setScrollFactor(0);
-    this.add.text(400, 250, 'Game Over! Caught by Drone', {
-        fontFamily: 'Orbitron, monospace',
-        fontSize: '32px',
-        color: '#ff3333',
-        stroke: '#fff',
-        strokeThickness: 4
-    }).setOrigin(0.5).setDepth(4).setScrollFactor(0);
-    restartButton = this.add.rectangle(400, 350, 100, 50, 0x0033ff, 0.8).setDepth(4).setScrollFactor(0).setInteractive();
-    restartText = this.add.text(400, 350, 'Restart', {
-        fontFamily: 'Orbitron, monospace',
-        fontSize: '24px',
-        color: '#fff',
-        stroke: '#00bfff',
-        strokeThickness: 2
-    }).setOrigin(0.5).setDepth(4).setScrollFactor(0);
-    restartButton.on('pointerdown', () => restartGame.call(this));
+function proceedToNextLevel() {
+    if (victorySpaceListener) {
+        window.removeEventListener('keydown', victorySpaceListener);
+        victorySpaceListener = null;
+    }
+    level = Math.min(level + 1, maxLevel);
+    dataNodesCollected = 0;
+    gameState = 'playing';
+    this.physics.world.isPaused = false;
+    if (victoryScreen) victoryScreen.destroy();
+    if (restartButton) restartButton.destroy();
+    if (restartText) restartText.destroy();
+    if (nextLevelButton) nextLevelButton.destroy();
+    this.children.list.filter(c => c.depth === 4 && c.type === 'Text' && (c.text.startsWith('Level') || c.text.startsWith('All Data Nodes'))).forEach(c => c.destroy());
+    if (droneEliminatedMsg) {
+        droneEliminatedMsg.destroy();
+        droneEliminatedMsg = null;
+    }
+    this.scene.restart();
 }
 
 function restartGame() {
@@ -458,86 +559,19 @@ function restartGame() {
         victorySpaceListener = null;
     }
     dataNodesCollected = 0;
-    gameState = 'playing';
+    gameState = 'menu';
     this.physics.world.isPaused = false;
-    runner.setPosition(25 * 32 + 16, 25 * 32 + 16);
-    if (runner.body) {
-        runner.body.x = runner.x - runner.body.width / 2;
-        runner.body.y = runner.y - runner.body.height / 2;
-    }
-    dataNodes.clear(true, true);
-    drones.clear(true, true);
-    // Remove all placeholder graphics for nodes and drones
-    this.children.list.filter(c => c.depth === 2 && (c.type === 'Ellipse' || c.type === 'Triangle')).forEach(c => c.destroy());
-    // Respawn Data Nodes
-    let nodePositions = [];
-    for (let i = 0; i < totalDataNodes; i++) {
-        let x, y, pos;
-        do {
-            x = Phaser.Math.Between(0, 49);
-            y = Phaser.Math.Between(0, 49);
-            pos = `${x},${y}`;
-        } while ((x === 25 && y === 25) || nodePositions.includes(pos));
-        nodePositions.push(pos);
-        let orb = this.add.circle(x * 32 + 16, y * 32 + 16, 16, 0xff33cc, 0.7).setDepth(2);
-        let spark = this.add.circle(x * 32 + 16, y * 32 + 16, 20, 0xffffff, 0.1).setDepth(2);
-        let node = this.physics.add.sprite(x * 32 + 16, y * 32 + 16, null).setDisplaySize(32, 32).setDepth(2);
-        node.orb = orb;
-        node.spark = spark;
-        dataNodes.add(node);
-    }
-    // Respawn Drones
-    let dronePositions = [];
-    for (let i = 0; i < 10; i++) {
-        let x, y, pos;
-        do {
-            x = Phaser.Math.Between(0, 49);
-            y = Phaser.Math.Between(0, 49);
-            pos = `${x},${y}`;
-        } while ((x === 25 && y === 25) || nodePositions.includes(pos) || dronePositions.includes(pos) || isAdjacentToAnyNode(x, y, nodePositions) || Math.abs(x - 25) < 5 || Math.abs(y - 25) < 5);
-        dronePositions.push(pos);
-        // Draw drone as a container
-        const droneContainer = this.add.container(x * 32 + 16, y * 32 + 16);
-        // Central body
-        const body = this.add.ellipse(0, 0, 20, 16, 0xff3333).setStrokeStyle(2, 0xffffff, 0.7);
-        // Side arms
-        const armL = this.add.rectangle(-14, 0, 8, 4, 0x880000).setAngle(20);
-        const armR = this.add.rectangle(14, 0, 8, 4, 0x880000).setAngle(-20);
-        // Glowing red eye
-        const eye = this.add.circle(0, 0, 4, 0xffffff, 1).setStrokeStyle(2, 0xff3333, 1);
-        // Neon underglow
-        const underglow = this.add.ellipse(0, 8, 24, 8, 0xff3333, 0.18);
-        // Health bar background
-        const healthBarBg = this.add.rectangle(0, -22, 24, 5, 0x222222, 0.8);
-        // Health bar foreground
-        const healthBar = this.add.rectangle(0, -22, 24, 5, 0x00ff00, 1);
-        healthBar.setOrigin(0.5, 0.5);
-        healthBarBg.setOrigin(0.5, 0.5);
-        droneContainer.add([underglow, armL, armR, body, eye, healthBarBg, healthBar]);
-        droneContainer.setDepth(2);
-        // Add physics
-        const dronePhysics = this.physics.add.existing(droneContainer);
-        dronePhysics.body.setSize(24, 16);
-        dronePhysics.body.setCollideWorldBounds(true);
-        dronePhysics.setPosition(x * 32 + 16, y * 32 + 16);
-        drones.add(droneContainer);
-        droneContainer.prevPos = { x: x * 32 + 16, y: y * 32 + 16 };
-        // Add hitCount to drones
-        droneContainer.hitCount = 0;
-        droneContainer.healthBar = healthBar;
-    }
-    dronesRemaining = drones.getChildren().length;
-    // Remove overlays
     if (victoryScreen) victoryScreen.destroy();
     if (gameOverScreen) gameOverScreen.destroy();
     if (restartButton) restartButton.destroy();
     if (restartText) restartText.destroy();
-    this.children.list.filter(c => c.depth === 4 && c.type === 'Text' && c.text.startsWith('Victory')).forEach(c => c.destroy());
-    this.children.list.filter(c => c.depth === 4 && c.type === 'Text' && c.text.startsWith('Game Over')).forEach(c => c.destroy());
+    if (nextLevelButton) nextLevelButton.destroy();
+    this.children.list.filter(c => c.depth === 4 && c.type === 'Text' && (c.text.startsWith('Victory') || c.text.startsWith('Game Over') || c.text.startsWith('Level') || c.text.startsWith('All Data Nodes'))).forEach(c => c.destroy());
     if (droneEliminatedMsg) {
         droneEliminatedMsg.destroy();
         droneEliminatedMsg = null;
     }
+    this.scene.restart();
 }
 
 function moveRunner(scene) {
