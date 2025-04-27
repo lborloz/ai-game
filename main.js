@@ -296,6 +296,12 @@ function create() {
 
 function collectNode(runner, node) {
     if (gameState !== 'playing') return;
+    // Only collect if runner and node are on the same grid cell
+    const runnerGridX = Math.round((runner.x - 16) / 32);
+    const runnerGridY = Math.round((runner.y - 16) / 32);
+    const nodeGridX = Math.round((node.x - 16) / 32);
+    const nodeGridY = Math.round((node.y - 16) / 32);
+    if (runnerGridX !== nodeGridX || runnerGridY !== nodeGridY) return;
     node.orb.destroy();
     node.spark.destroy();
     node.destroy();
