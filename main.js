@@ -565,50 +565,6 @@ function update() {
         moveInterval.remove();
         moveInterval = null;
     }
-    // Movement
-    let move = null;
-    if (!moveLock) {
-        if (cursors.left.isDown || cursors.wasd.left.isDown || dpadDirection === 'left') {
-            move = { dx: -1, dy: 0 };
-        } else if (cursors.right.isDown || cursors.wasd.right.isDown || dpadDirection === 'right') {
-            move = { dx: 1, dy: 0 };
-        } else if (cursors.up.isDown || cursors.wasd.up.isDown || dpadDirection === 'up') {
-            move = { dx: 0, dy: -1 };
-        } else if (cursors.down.isDown || cursors.wasd.down.isDown || dpadDirection === 'down') {
-            move = { dx: 0, dy: 1 };
-        }
-        if (move) {
-            let gridX = Math.round((runner.x - 16) / 32);
-            let gridY = Math.round((runner.y - 16) / 32);
-            let newX = gridX + move.dx;
-            let newY = gridY + move.dy;
-            if (newX >= 0 && newX <= 49 && newY >= 0 && newY <= 49 && (newX !== gridX || newY !== gridY)) {
-                runner.setPosition(newX * 32 + 16, newY * 32 + 16);
-                // Set rotation based on direction
-                if (move.dx === -1) {
-                    runner.rotation = -Math.PI / 2; // Left
-                } else if (move.dx === 1) {
-                    runner.rotation = Math.PI / 2; // Right
-                } else if (move.dy === -1) {
-                    runner.rotation = 0; // Up
-                } else if (move.dy === 1) {
-                    runner.rotation = Math.PI; // Down
-                }
-                moveSound.play();
-                moveLock = true;
-            }
-        }
-    }
-    // Release lock when all movement keys are up
-    if (
-        !cursors.left.isDown && !cursors.right.isDown &&
-        !cursors.up.isDown && !cursors.down.isDown &&
-        !cursors.wasd.left.isDown && !cursors.wasd.right.isDown &&
-        !cursors.wasd.up.isDown && !cursors.wasd.down.isDown &&
-        dpadDirection === ''
-    ) {
-        moveLock = false;
-    }
 
     // Update HUD
     const gridX = Math.floor(runner.x / 32);
