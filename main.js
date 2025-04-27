@@ -28,6 +28,13 @@ let isMuted = false;
 let moveLock = false; // Add a lock for debounced movement
 let totalDataNodes = 10; // Track total number of data nodes
 let moveInterval = null; // Timer for continuous movement
+let bullets; // Group for bullets
+let lastFired = 0; // For fire rate limiting
+const BULLET_SPEED = 400;
+const BULLET_LIFESPAN = 10000; // ms (effectively infinite for most shots)
+const BULLET_FIRE_RATE = 200; // ms
+let lastDirection = 'up'; // Track last movement direction
+let bulletMoveInterval = 100; // ms between bullet moves
 
 function preload() {
     // No image loading needed for runner
@@ -128,7 +135,13 @@ function create() {
         const eye = this.add.circle(0, 0, 4, 0xffffff, 1).setStrokeStyle(2, 0xff3333, 1);
         // Neon underglow
         const underglow = this.add.ellipse(0, 8, 24, 8, 0xff3333, 0.18);
-        droneContainer.add([underglow, armL, armR, body, eye]);
+        // Health bar background
+        const healthBarBg = this.add.rectangle(0, -22, 24, 5, 0x222222, 0.8);
+        // Health bar foreground
+        const healthBar = this.add.rectangle(0, -22, 24, 5, 0x00ff00, 1);
+        healthBar.setOrigin(0.5, 0.5);
+        healthBarBg.setOrigin(0.5, 0.5);
+        droneContainer.add([underglow, armL, armR, body, eye, healthBarBg, healthBar]);
         droneContainer.setDepth(2);
         // Add physics
         const dronePhysics = this.physics.add.existing(droneContainer);
@@ -137,6 +150,9 @@ function create() {
         dronePhysics.setPosition(x * 32 + 16, y * 32 + 16);
         drones.add(droneContainer);
         droneContainer.prevPos = { x: x * 32 + 16, y: y * 32 + 16 };
+        // Add hitCount to drones
+        droneContainer.hitCount = 0;
+        droneContainer.healthBar = healthBar;
     }
 
     // Camera
@@ -230,6 +246,50 @@ function create() {
         isMuted = !isMuted;
         muteButton.setText(isMuted ? '🔇' : '🔊');
         // Would mute/unmute audio here
+    });
+
+    // Add bullets group
+    bullets = this.physics.add.group();
+
+    // Fire bullet on spacebar
+    this.input.keyboard.on('keydown-SPACE', () => {
+        if (gameState !== 'playing') return;
+        if (this.time.now - lastFired < BULLET_FIRE_RATE) return;
+        lastFired = this.time.now;
+        // Fire bullet in lastDirection
+        let dx = 0, dy = 0;
+        if (lastDirection === 'left') dx = -1;
+        else if (lastDirection === 'right') dx = 1;
+        else if (lastDirection === 'up') dy = -1;
+        else if (lastDirection === 'down') dy = 1;
+        // Get grid position
+        let gridX = Math.round((runner.x - 16) / 32);
+        let gridY = Math.round((runner.y - 16) / 32);
+        // Create bullet as a sprite (no texture, just color)
+        let bullet = this.add.ellipse(gridX * 32 + 16, gridY * 32 + 16, 16, 16, 0xff33cc).setDepth(3);
+        bullet.gridX = gridX;
+        bullet.gridY = gridY;
+        bullet.dx = dx;
+        bullet.dy = dy;
+        bullet.lastMove = this.time.now;
+        bullets.add(bullet);
+    });
+    // Bullet-drone collision
+    this.physics.add.overlap(bullets, drones, (bullet, drone) => {
+        if (!drone.hitCount) drone.hitCount = 0;
+        drone.hitCount++;
+        bullet.destroy();
+        // Update health bar
+        if (drone.healthBar) {
+            let percent = Math.max(0, 1 - drone.hitCount / 3);
+            drone.healthBar.width = 24 * percent;
+            if (percent > 0.5) drone.healthBar.fillColor = 0x00ff00;
+            else if (percent > 0.25) drone.healthBar.fillColor = 0xffff00;
+            else drone.healthBar.fillColor = 0xff3333;
+        }
+        if (drone.hitCount >= 3) {
+            drone.destroy();
+        }
     });
 }
 
@@ -372,6 +432,10 @@ function restartGame() {
     gameState = 'playing';
     this.physics.world.isPaused = false;
     runner.setPosition(25 * 32 + 16, 25 * 32 + 16);
+    if (runner.body) {
+        runner.body.x = runner.x - runner.body.width / 2;
+        runner.body.y = runner.y - runner.body.height / 2;
+    }
     dataNodes.clear(true, true);
     drones.clear(true, true);
     // Remove all placeholder graphics for nodes and drones
@@ -414,7 +478,13 @@ function restartGame() {
         const eye = this.add.circle(0, 0, 4, 0xffffff, 1).setStrokeStyle(2, 0xff3333, 1);
         // Neon underglow
         const underglow = this.add.ellipse(0, 8, 24, 8, 0xff3333, 0.18);
-        droneContainer.add([underglow, armL, armR, body, eye]);
+        // Health bar background
+        const healthBarBg = this.add.rectangle(0, -22, 24, 5, 0x222222, 0.8);
+        // Health bar foreground
+        const healthBar = this.add.rectangle(0, -22, 24, 5, 0x00ff00, 1);
+        healthBar.setOrigin(0.5, 0.5);
+        healthBarBg.setOrigin(0.5, 0.5);
+        droneContainer.add([underglow, armL, armR, body, eye, healthBarBg, healthBar]);
         droneContainer.setDepth(2);
         // Add physics
         const dronePhysics = this.physics.add.existing(droneContainer);
@@ -423,6 +493,9 @@ function restartGame() {
         dronePhysics.setPosition(x * 32 + 16, y * 32 + 16);
         drones.add(droneContainer);
         droneContainer.prevPos = { x: x * 32 + 16, y: y * 32 + 16 };
+        // Add hitCount to drones
+        droneContainer.hitCount = 0;
+        droneContainer.healthBar = healthBar;
     }
     // Remove overlays
     if (victoryScreen) victoryScreen.destroy();
@@ -438,19 +511,23 @@ function moveRunner(scene) {
     let move = null;
     if (cursors.left.isDown || cursors.wasd.left.isDown || dpadDirection === 'left') {
         move = { dx: -1, dy: 0 };
+        lastDirection = 'left';
     } else if (cursors.right.isDown || cursors.wasd.right.isDown || dpadDirection === 'right') {
         move = { dx: 1, dy: 0 };
+        lastDirection = 'right';
     } else if (cursors.up.isDown || cursors.wasd.up.isDown || dpadDirection === 'up') {
         move = { dx: 0, dy: -1 };
+        lastDirection = 'up';
     } else if (cursors.down.isDown || cursors.wasd.down.isDown || dpadDirection === 'down') {
         move = { dx: 0, dy: 1 };
+        lastDirection = 'down';
     }
     if (move) {
         let gridX = Math.round((runner.x - 16) / 32);
         let gridY = Math.round((runner.y - 16) / 32);
-        let newX = Phaser.Math.Clamp(gridX + move.dx, 0, 49);
-        let newY = Phaser.Math.Clamp(gridY + move.dy, 0, 49);
-        if (newX !== gridX || newY !== gridY) {
+        let newX = gridX + move.dx;
+        let newY = gridY + move.dy;
+        if (newX >= 0 && newX <= 49 && newY >= 0 && newY <= 49 && (newX !== gridX || newY !== gridY)) {
             runner.setPosition(newX * 32 + 16, newY * 32 + 16);
             // Set rotation based on direction
             if (move.dx === -1) {
@@ -503,9 +580,9 @@ function update() {
         if (move) {
             let gridX = Math.round((runner.x - 16) / 32);
             let gridY = Math.round((runner.y - 16) / 32);
-            let newX = Phaser.Math.Clamp(gridX + move.dx, 0, 49);
-            let newY = Phaser.Math.Clamp(gridY + move.dy, 0, 49);
-            if (newX !== gridX || newY !== gridY) {
+            let newX = gridX + move.dx;
+            let newY = gridY + move.dy;
+            if (newX >= 0 && newX <= 49 && newY >= 0 && newY <= 49 && (newX !== gridX || newY !== gridY)) {
                 runner.setPosition(newX * 32 + 16, newY * 32 + 16);
                 // Set rotation based on direction
                 if (move.dx === -1) {
@@ -537,4 +614,22 @@ function update() {
     const gridX = Math.floor(runner.x / 32);
     const gridY = Math.floor(runner.y / 32);
     hudText.setText(`X: ${gridX}, Y: ${gridY} | Nodes: ${dataNodesCollected}/${totalDataNodes}`);
+
+    // Bullet grid movement and cleanup
+    bullets.getChildren().forEach(bullet => {
+        if (this.time.now - bullet.lastMove >= bulletMoveInterval) {
+            bullet.gridX += bullet.dx;
+            bullet.gridY += bullet.dy;
+            bullet.x = bullet.gridX * 32 + 16;
+            bullet.y = bullet.gridY * 32 + 16;
+            bullet.lastMove = this.time.now;
+        }
+        // Remove if out of bounds
+        if (
+            bullet.gridX < 0 || bullet.gridX > 49 ||
+            bullet.gridY < 0 || bullet.gridY > 49
+        ) {
+            bullet.destroy();
+        }
+    });
 }
