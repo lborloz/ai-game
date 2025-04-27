@@ -32,9 +32,11 @@ let bullets; // Group for bullets
 let lastFired = 0; // For fire rate limiting
 const BULLET_SPEED = 400;
 const BULLET_LIFESPAN = 10000; // ms (effectively infinite for most shots)
-const BULLET_FIRE_RATE = 200; // ms
+const BULLET_FIRE_RATE = 300; // ms (was 200)
 let lastDirection = 'up'; // Track last movement direction
 let bulletMoveInterval = 100; // ms between bullet moves
+let spaceBarHeld = false; // Track if space bar is held
+let fireInterval = null; // Timer for rapid fire
 
 function preload() {
     // No image loading needed for runner
@@ -251,28 +253,27 @@ function create() {
     // Add bullets group
     bullets = this.physics.add.group();
 
-    // Fire bullet on spacebar
+    // Fire bullet on spacebar (rapid fire)
     this.input.keyboard.on('keydown-SPACE', () => {
         if (gameState !== 'playing') return;
-        if (this.time.now - lastFired < BULLET_FIRE_RATE) return;
-        lastFired = this.time.now;
-        // Fire bullet in lastDirection
-        let dx = 0, dy = 0;
-        if (lastDirection === 'left') dx = -1;
-        else if (lastDirection === 'right') dx = 1;
-        else if (lastDirection === 'up') dy = -1;
-        else if (lastDirection === 'down') dy = 1;
-        // Get grid position
-        let gridX = Math.round((runner.x - 16) / 32);
-        let gridY = Math.round((runner.y - 16) / 32);
-        // Create bullet as a sprite (no texture, just color)
-        let bullet = this.add.ellipse(gridX * 32 + 16, gridY * 32 + 16, 16, 16, 0xff33cc).setDepth(3);
-        bullet.gridX = gridX;
-        bullet.gridY = gridY;
-        bullet.dx = dx;
-        bullet.dy = dy;
-        bullet.lastMove = this.time.now;
-        bullets.add(bullet);
+        if (!spaceBarHeld) {
+            spaceBarHeld = true;
+            // Fire immediately
+            fireBullet.call(this);
+            // Start rapid fire interval
+            fireInterval = this.time.addEvent({
+                delay: BULLET_FIRE_RATE,
+                callback: () => fireBullet.call(this),
+                loop: true
+            });
+        }
+    });
+    this.input.keyboard.on('keyup-SPACE', () => {
+        spaceBarHeld = false;
+        if (fireInterval) {
+            fireInterval.remove();
+            fireInterval = null;
+        }
     });
     // Bullet-drone collision
     this.physics.add.overlap(bullets, drones, (bullet, drone) => {
@@ -588,4 +589,26 @@ function update() {
             bullet.destroy();
         }
     });
+}
+
+// Helper function to fire a bullet
+function fireBullet() {
+    if (gameState !== 'playing') return;
+    // Fire bullet in lastDirection
+    let dx = 0, dy = 0;
+    if (lastDirection === 'left') dx = -1;
+    else if (lastDirection === 'right') dx = 1;
+    else if (lastDirection === 'up') dy = -1;
+    else if (lastDirection === 'down') dy = 1;
+    // Get grid position
+    let gridX = Math.round((runner.x - 16) / 32);
+    let gridY = Math.round((runner.y - 16) / 32);
+    // Create bullet as a sprite (no texture, just color)
+    let bullet = this.add.ellipse(gridX * 32 + 16, gridY * 32 + 16, 16, 16, 0xff33cc).setDepth(3);
+    bullet.gridX = gridX;
+    bullet.gridY = gridY;
+    bullet.dx = dx;
+    bullet.dy = dy;
+    bullet.lastMove = this.time.now;
+    bullets.add(bullet);
 }
