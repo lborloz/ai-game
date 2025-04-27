@@ -37,6 +37,8 @@ let lastDirection = 'up'; // Track last movement direction
 let bulletMoveInterval = 100; // ms between bullet moves
 let spaceBarHeld = false; // Track if space bar is held
 let fireInterval = null; // Timer for rapid fire
+let dronesRemaining = 0; // Track number of drones remaining
+let droneEliminatedMsg = null; // Reference to the popup message
 
 function preload() {
     // No image loading needed for runner
@@ -156,6 +158,7 @@ function create() {
         droneContainer.hitCount = 0;
         droneContainer.healthBar = healthBar;
     }
+    dronesRemaining = drones.getChildren().length;
 
     // Camera
     this.cameras.main.startFollow(runner, true, 0.1, 0.1);
@@ -290,6 +293,10 @@ function create() {
         }
         if (drone.hitCount >= 3) {
             drone.destroy();
+            dronesRemaining--;
+            if (dronesRemaining === 0) {
+                showAllDronesEliminatedMsg.call(this);
+            }
         }
     });
 }
@@ -504,6 +511,7 @@ function restartGame() {
         droneContainer.hitCount = 0;
         droneContainer.healthBar = healthBar;
     }
+    dronesRemaining = drones.getChildren().length;
     // Remove overlays
     if (victoryScreen) victoryScreen.destroy();
     if (gameOverScreen) gameOverScreen.destroy();
@@ -511,6 +519,10 @@ function restartGame() {
     if (restartText) restartText.destroy();
     this.children.list.filter(c => c.depth === 4 && c.type === 'Text' && c.text.startsWith('Victory')).forEach(c => c.destroy());
     this.children.list.filter(c => c.depth === 4 && c.type === 'Text' && c.text.startsWith('Game Over')).forEach(c => c.destroy());
+    if (droneEliminatedMsg) {
+        droneEliminatedMsg.destroy();
+        droneEliminatedMsg = null;
+    }
 }
 
 function moveRunner(scene) {
@@ -576,7 +588,7 @@ function update() {
     // Update HUD
     const gridX = Math.floor(runner.x / 32);
     const gridY = Math.floor(runner.y / 32);
-    hudText.setText(`X: ${gridX}, Y: ${gridY} | Nodes: ${dataNodesCollected}/${totalDataNodes}`);
+    hudText.setText(`X: ${gridX}, Y: ${gridY} | Nodes: ${dataNodesCollected}/${totalDataNodes} | Drones: ${dronesRemaining}`);
 
     // Bullet grid movement and cleanup
     bullets.getChildren().forEach(bullet => {
@@ -617,4 +629,25 @@ function fireBullet() {
     bullet.dy = dy;
     bullet.lastMove = this.time.now;
     bullets.add(bullet);
+}
+
+// Show a temporary message when all drones are eliminated
+function showAllDronesEliminatedMsg() {
+    if (droneEliminatedMsg) droneEliminatedMsg.destroy();
+    droneEliminatedMsg = this.add.text(400, 180, 'All Drones Eliminated!', {
+        fontFamily: 'Orbitron, monospace',
+        fontSize: '36px',
+        color: '#00ffcc',
+        stroke: '#0033ff',
+        strokeThickness: 5,
+        align: 'center',
+        backgroundColor: '#111a',
+        padding: { left: 16, right: 16, top: 8, bottom: 8 }
+    }).setOrigin(0.5).setDepth(5).setScrollFactor(0);
+    this.time.delayedCall(2000, () => {
+        if (droneEliminatedMsg) {
+            droneEliminatedMsg.destroy();
+            droneEliminatedMsg = null;
+        }
+    });
 }
