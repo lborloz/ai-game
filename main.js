@@ -39,6 +39,7 @@ let spaceBarHeld = false; // Track if space bar is held
 let fireInterval = null; // Timer for rapid fire
 let dronesRemaining = 0; // Track number of drones remaining
 let droneEliminatedMsg = null; // Reference to the popup message
+let victorySpaceListener = null; // Reference for space bar listener on victory screen
 
 function preload() {
     // No image loading needed for runner
@@ -419,6 +420,15 @@ function showVictoryScreen() {
     }).setOrigin(0.5).setDepth(4).setScrollFactor(0);
     restartButton.on('pointerdown', () => restartGame.call(this));
     victorySound.play();
+    // Add space bar listener for restart
+    if (!victorySpaceListener) {
+        victorySpaceListener = (event) => {
+            if (event.code === 'Space' && gameState === 'victory') {
+                restartGame.call(this);
+            }
+        };
+        window.addEventListener('keydown', victorySpaceListener);
+    }
 }
 
 function showGameOverScreen() {
@@ -442,6 +452,11 @@ function showGameOverScreen() {
 }
 
 function restartGame() {
+    // Remove the space bar listener if it exists
+    if (victorySpaceListener) {
+        window.removeEventListener('keydown', victorySpaceListener);
+        victorySpaceListener = null;
+    }
     dataNodesCollected = 0;
     gameState = 'playing';
     this.physics.world.isPaused = false;
