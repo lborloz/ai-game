@@ -26,6 +26,8 @@ let bgm, moveSound, nodeSound, gameOverSound, victorySound;
 let victoryScreen, gameOverScreen, restartButton, muteButton, restartText;
 let isMuted = false;
 let moveLock = false; // Add a lock for debounced movement
+let totalDataNodes = 10; // Track total number of data nodes
+let moveInterval = null; // Timer for continuous movement
 
 function preload() {
     // No image loading needed for runner
@@ -79,7 +81,7 @@ function create() {
     // Data Nodes (glowing orbs)
     dataNodes = this.physics.add.group();
     let nodePositions = [];
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < totalDataNodes; i++) {
         let x, y, pos;
         do {
             x = Phaser.Math.Between(0, 49);
@@ -101,7 +103,7 @@ function create() {
     // Security Drones (cyberpunk drone graphics)
     drones = this.physics.add.group();
     let dronePositions = [];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 10; i++) {
         let x, y, pos;
         do {
             x = Phaser.Math.Between(0, 49);
@@ -110,7 +112,9 @@ function create() {
         } while (
             (x === 25 && y === 25) ||
             nodePositions.includes(pos) ||
-            dronePositions.includes(pos)
+            dronePositions.includes(pos) ||
+            isAdjacentToAnyNode(x, y, nodePositions) ||
+            Math.abs(x - 25) < 5 || Math.abs(y - 25) < 5
         );
         dronePositions.push(pos);
         // Draw drone as a container
@@ -132,6 +136,7 @@ function create() {
         dronePhysics.body.setCollideWorldBounds(true);
         dronePhysics.setPosition(x * 32 + 16, y * 32 + 16);
         drones.add(droneContainer);
+        droneContainer.prevPos = { x: x * 32 + 16, y: y * 32 + 16 };
     }
 
     // Camera
@@ -167,14 +172,20 @@ function create() {
     });
     dpad.on('pointerup', () => dpadDirection = '');
 
-    // HUD
-    hudText = this.add.text(700, 20, 'X: 25, Y: 25 | Nodes: 0/10', {
+    // HUD background
+    const hudBg = this.add.rectangle(400, 28, 260, 36, 0x000000, 0.55)
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(3);
+    hudText = this.add.text(400, 20, 'X: 25, Y: 25 | Nodes: 0/10', {
         fontFamily: 'Orbitron, monospace',
-        fontSize: '16px',
+        fontSize: '22px',
         color: '#00ffcc',
         stroke: '#0033ff',
-        strokeThickness: 2
-    }).setScrollFactor(0).setDepth(3);
+        strokeThickness: 3,
+        align: 'center',
+        padding: { left: 8, right: 8, top: 4, bottom: 4 }
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(4);
 
     // Audio (placeholder: no sound, but structure in place)
     bgm = { play: () => { }, stop: () => { } };
@@ -189,7 +200,7 @@ function create() {
 
     // Drone Movement
     this.time.addEvent({
-        delay: 1000,
+        delay: 500,
         callback: moveDrones,
         callbackScope: this,
         loop: true
@@ -229,7 +240,7 @@ function collectNode(runner, node) {
     node.destroy();
     dataNodesCollected++;
     nodeSound.play();
-    if (dataNodesCollected === 10) {
+    if (dataNodesCollected === totalDataNodes) {
         gameState = 'victory';
         this.physics.world.isPaused = true;
         showVictoryScreen.call(this);
@@ -247,20 +258,71 @@ function hitDrone() {
 function moveDrones() {
     if (gameState !== 'playing') return;
     drones.getChildren().forEach(drone => {
-        const directions = ['up', 'down', 'left', 'right'];
-        const dir = Phaser.Math.RND.pick(directions);
-        let newX = drone.x, newY = drone.y;
-        if (dir === 'up') newY -= 32;
-        else if (dir === 'down') newY += 32;
-        else if (dir === 'left') newX -= 32;
-        else newX += 32;
-        if (
-            newX >= 16 && newX <= 1584 && newY >= 16 && newY <= 1584 &&
-            !drones.getChildren().some(d => d !== drone && d.x === newX && d.y === newY) &&
-            !dataNodes.getChildren().some(n => n.x === newX && n.y === newY)
-        ) {
-            drone.setPosition(newX, newY);
+        // Find the closest data node
+        let closestNode = null;
+        let minDist = Infinity;
+        dataNodes.getChildren().forEach(node => {
+            const dist = Phaser.Math.Distance.Between(drone.x, drone.y, node.x, node.y);
+            if (dist < minDist) {
+                minDist = dist;
+                closestNode = node;
+            }
+        });
+        if (!closestNode) return; // No nodes left
+        // Determine best direction to move toward the node
+        const dx = closestNode.x - drone.x;
+        const dy = closestNode.y - drone.y;
+        let directions = [];
+        if (Math.abs(dx) > Math.abs(dy)) {
+            directions.push(dx > 0 ? 'right' : 'left');
+            if (dy !== 0) directions.push(dy > 0 ? 'down' : 'up');
+        } else if (dy !== 0) {
+            directions.push(dy > 0 ? 'down' : 'up');
+            if (dx !== 0) directions.push(dx > 0 ? 'right' : 'left');
         }
+        ['up', 'down', 'left', 'right'].forEach(dir => {
+            if (!directions.includes(dir)) directions.push(dir);
+        });
+        if (directions.length > 1) {
+            const first = directions[0];
+            const rest = directions.slice(1);
+            Phaser.Utils.Array.Shuffle(rest);
+            directions = [first, ...rest];
+        }
+        // Try each direction in order, skipping the previous position
+        let moved = false;
+        for (let dir of directions) {
+            let newX = drone.x, newY = drone.y;
+            if (dir === 'up') newY -= 32;
+            else if (dir === 'down') newY += 32;
+            else if (dir === 'left') newX -= 32;
+            else if (dir === 'right') newX += 32;
+            // Skip if this is the previous position
+            if (drone.prevPos && drone.prevPos.x === newX && drone.prevPos.y === newY) continue;
+            const isAdjacentToNode = dataNodes.getChildren().some(n =>
+                Math.abs(n.x - newX) <= 32 && Math.abs(n.y - newY) <= 32 && !(n.x === newX && n.y === newY)
+            );
+            if (
+                newX >= 16 && newX <= 1584 && newY >= 16 && newY <= 1584 &&
+                !drones.getChildren().some(d => d !== drone && d.x === newX && d.y === newY) &&
+                !dataNodes.getChildren().some(n => n.x === newX && n.y === newY) &&
+                !isAdjacentToNode
+            ) {
+                // Update prevPos before moving
+                drone.prevPos = { x: drone.x, y: drone.y };
+                drone.setPosition(newX, newY);
+                moved = true;
+                break;
+            }
+        }
+        // If no move is possible, drone stays in place (rare)
+    });
+}
+
+function isAdjacentToAnyNode(x, y, nodePositions) {
+    return nodePositions.some(pos => {
+        const [nx, ny] = pos.split(',').map(Number);
+        return Math.abs(nx - x) <= 1 && Math.abs(ny - y) <= 1 && !(nx === x && ny === y);
     });
 }
 
@@ -316,7 +378,7 @@ function restartGame() {
     this.children.list.filter(c => c.depth === 2 && (c.type === 'Ellipse' || c.type === 'Triangle')).forEach(c => c.destroy());
     // Respawn Data Nodes
     let nodePositions = [];
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < totalDataNodes; i++) {
         let x, y, pos;
         do {
             x = Phaser.Math.Between(0, 49);
@@ -333,13 +395,13 @@ function restartGame() {
     }
     // Respawn Drones
     let dronePositions = [];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 10; i++) {
         let x, y, pos;
         do {
             x = Phaser.Math.Between(0, 49);
             y = Phaser.Math.Between(0, 49);
             pos = `${x},${y}`;
-        } while ((x === 25 && y === 25) || nodePositions.includes(pos) || dronePositions.includes(pos));
+        } while ((x === 25 && y === 25) || nodePositions.includes(pos) || dronePositions.includes(pos) || isAdjacentToAnyNode(x, y, nodePositions) || Math.abs(x - 25) < 5 || Math.abs(y - 25) < 5);
         dronePositions.push(pos);
         // Draw drone as a container
         const droneContainer = this.add.container(x * 32 + 16, y * 32 + 16);
@@ -360,6 +422,7 @@ function restartGame() {
         dronePhysics.body.setCollideWorldBounds(true);
         dronePhysics.setPosition(x * 32 + 16, y * 32 + 16);
         drones.add(droneContainer);
+        droneContainer.prevPos = { x: x * 32 + 16, y: y * 32 + 16 };
     }
     // Remove overlays
     if (victoryScreen) victoryScreen.destroy();
@@ -370,9 +433,61 @@ function restartGame() {
     this.children.list.filter(c => c.depth === 4 && c.type === 'Text' && c.text.startsWith('Game Over')).forEach(c => c.destroy());
 }
 
+function moveRunner(scene) {
+    if (gameState !== 'playing') return;
+    let move = null;
+    if (cursors.left.isDown || cursors.wasd.left.isDown || dpadDirection === 'left') {
+        move = { dx: -1, dy: 0 };
+    } else if (cursors.right.isDown || cursors.wasd.right.isDown || dpadDirection === 'right') {
+        move = { dx: 1, dy: 0 };
+    } else if (cursors.up.isDown || cursors.wasd.up.isDown || dpadDirection === 'up') {
+        move = { dx: 0, dy: -1 };
+    } else if (cursors.down.isDown || cursors.wasd.down.isDown || dpadDirection === 'down') {
+        move = { dx: 0, dy: 1 };
+    }
+    if (move) {
+        let gridX = Math.round((runner.x - 16) / 32);
+        let gridY = Math.round((runner.y - 16) / 32);
+        let newX = Phaser.Math.Clamp(gridX + move.dx, 0, 49);
+        let newY = Phaser.Math.Clamp(gridY + move.dy, 0, 49);
+        if (newX !== gridX || newY !== gridY) {
+            runner.setPosition(newX * 32 + 16, newY * 32 + 16);
+            // Set rotation based on direction
+            if (move.dx === -1) {
+                runner.rotation = -Math.PI / 2; // Left
+            } else if (move.dx === 1) {
+                runner.rotation = Math.PI / 2; // Right
+            } else if (move.dy === -1) {
+                runner.rotation = 0; // Up
+            } else if (move.dy === 1) {
+                runner.rotation = Math.PI; // Down
+            }
+            moveSound.play();
+        }
+    }
+}
+
 function update() {
     if (gameState !== 'playing') return;
 
+    // Movement: start/stop interval for continuous movement
+    const anyKeyDown =
+        cursors.left.isDown || cursors.right.isDown ||
+        cursors.up.isDown || cursors.down.isDown ||
+        cursors.wasd.left.isDown || cursors.wasd.right.isDown ||
+        cursors.wasd.up.isDown || cursors.wasd.down.isDown ||
+        dpadDirection !== '';
+    if (anyKeyDown && !moveInterval) {
+        moveRunner(this); // Move immediately on press
+        moveInterval = this.time.addEvent({
+            delay: 200,
+            callback: () => moveRunner(this),
+            loop: true
+        });
+    } else if (!anyKeyDown && moveInterval) {
+        moveInterval.remove();
+        moveInterval = null;
+    }
     // Movement
     let move = null;
     if (!moveLock) {
@@ -392,6 +507,16 @@ function update() {
             let newY = Phaser.Math.Clamp(gridY + move.dy, 0, 49);
             if (newX !== gridX || newY !== gridY) {
                 runner.setPosition(newX * 32 + 16, newY * 32 + 16);
+                // Set rotation based on direction
+                if (move.dx === -1) {
+                    runner.rotation = -Math.PI / 2; // Left
+                } else if (move.dx === 1) {
+                    runner.rotation = Math.PI / 2; // Right
+                } else if (move.dy === -1) {
+                    runner.rotation = 0; // Up
+                } else if (move.dy === 1) {
+                    runner.rotation = Math.PI; // Down
+                }
                 moveSound.play();
                 moveLock = true;
             }
@@ -411,5 +536,5 @@ function update() {
     // Update HUD
     const gridX = Math.floor(runner.x / 32);
     const gridY = Math.floor(runner.y / 32);
-    hudText.setText(`X: ${gridX}, Y: ${gridY} | Nodes: ${dataNodesCollected}/10`);
+    hudText.setText(`X: ${gridX}, Y: ${gridY} | Nodes: ${dataNodesCollected}/${totalDataNodes}`);
 }
