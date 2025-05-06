@@ -39,7 +39,7 @@ let spaceBarHeld = false; // Track if space bar is held
 let fireInterval = null; // Timer for rapid fire
 let dronesRemaining = 0; // Track number of drones remaining
 let droneEliminatedMsg = null; // Reference to the popup message
-let victorySpaceListener = null; // Reference for space bar listener on victory screen
+let activeSpaceListener = null; // Unified listener for space key on screens
 
 // Level system
 let level = 1;
@@ -477,6 +477,53 @@ function showMenuScreen() {
     }).setOrigin(0.5).setDepth(11).setScrollFactor(0);
 }
 
+function showGameOverScreen() {
+    // Prevent multiple game over screens
+    if (gameOverScreen) return;
+
+    gameOverScreen = this.add.rectangle(400, 300, 800, 600, 0xff0000, 0.3).setDepth(4).setScrollFactor(0);
+    this.add.text(400, 250, 'Game Over', {
+        fontFamily: 'Orbitron, monospace',
+        fontSize: '48px',
+        color: '#ff3333',
+        stroke: '#ffffff',
+        strokeThickness: 6
+    }).setOrigin(0.5).setDepth(4).setScrollFactor(0);
+
+    // Restart button
+    restartButton = this.add.rectangle(400, 350, 180, 50, 0x0033ff, 0.8).setDepth(4).setScrollFactor(0).setInteractive();
+    restartText = this.add.text(400, 350, 'Restart (Space)', {
+        fontFamily: 'Orbitron, monospace',
+        fontSize: '24px',
+        color: '#fff',
+        stroke: '#00bfff',
+        strokeThickness: 2
+    }).setOrigin(0.5).setDepth(4).setScrollFactor(0);
+
+    restartButton.on('pointerdown', () => restartGame.call(this));
+
+    // Add space bar listener for restart
+    if (activeSpaceListener) {
+        window.removeEventListener('keydown', activeSpaceListener);
+        activeSpaceListener = null;
+    }
+
+    activeSpaceListener = (event) => {
+        if (event.code === 'Space' && gameState === 'gameover') {
+            window.removeEventListener('keydown', activeSpaceListener);
+            activeSpaceListener = null;
+            restartGame.call(this);
+        }
+    };
+    window.addEventListener('keydown', activeSpaceListener);
+
+    // Ensure other UI elements are cleaned up or hidden if necessary
+    if (droneEliminatedMsg) {
+        droneEliminatedMsg.destroy();
+        droneEliminatedMsg = null;
+    }
+}
+
 function showVictoryScreen() {
     victoryScreen = this.add.rectangle(400, 300, 800, 600, 0x00ffff, 0.3).setDepth(4).setScrollFactor(0);
     this.add.text(400, 220, `Level ${level} Complete!`, {
@@ -517,24 +564,28 @@ function showVictoryScreen() {
     restartButton.on('pointerdown', () => restartGame.call(this));
     victorySound.play();
     // Add space bar listener for next level or restart
-    if (!victorySpaceListener) {
-        victorySpaceListener = (event) => {
-            if (event.code === 'Space' && gameState === 'victory') {
-                if (level < maxLevel) {
-                    proceedToNextLevel.call(this);
-                } else {
-                    restartGame.call(this);
-                }
-            }
-        };
-        window.addEventListener('keydown', victorySpaceListener);
+    if (activeSpaceListener) {
+        window.removeEventListener('keydown', activeSpaceListener);
+        activeSpaceListener = null;
     }
+    activeSpaceListener = (event) => {
+        if (event.code === 'Space' && gameState === 'victory') {
+            window.removeEventListener('keydown', activeSpaceListener);
+            activeSpaceListener = null;
+            if (level < maxLevel) {
+                proceedToNextLevel.call(this);
+            } else {
+                restartGame.call(this);
+            }
+        }
+    };
+    window.addEventListener('keydown', activeSpaceListener);
 }
 
 function proceedToNextLevel() {
-    if (victorySpaceListener) {
-        window.removeEventListener('keydown', victorySpaceListener);
-        victorySpaceListener = null;
+    if (activeSpaceListener) {
+        window.removeEventListener('keydown', activeSpaceListener);
+        activeSpaceListener = null;
     }
     level = Math.min(level + 1, maxLevel);
     dataNodesCollected = 0;
@@ -553,19 +604,35 @@ function proceedToNextLevel() {
 }
 
 function restartGame() {
-    // Remove the space bar listener if it exists
-    if (victorySpaceListener) {
-        window.removeEventListener('keydown', victorySpaceListener);
-        victorySpaceListener = null;
+    // Remove the active space bar listener if it exists
+    if (activeSpaceListener) {
+        window.removeEventListener('keydown', activeSpaceListener);
+        activeSpaceListener = null;
     }
     dataNodesCollected = 0;
     gameState = 'menu';
     this.physics.world.isPaused = false;
-    if (victoryScreen) victoryScreen.destroy();
-    if (gameOverScreen) gameOverScreen.destroy();
-    if (restartButton) restartButton.destroy();
-    if (restartText) restartText.destroy();
-    if (nextLevelButton) nextLevelButton.destroy();
+
+    if (victoryScreen) {
+        victoryScreen.destroy();
+        victoryScreen = null; // Nullify after destroy
+    }
+    if (gameOverScreen) {
+        gameOverScreen.destroy();
+        gameOverScreen = null; // Nullify after destroy
+    }
+    if (restartButton) {
+        restartButton.destroy();
+        restartButton = null; // Nullify after destroy
+    }
+    if (restartText) {
+        restartText.destroy();
+        restartText = null; // Nullify after destroy
+    }
+    if (nextLevelButton) {
+        nextLevelButton.destroy();
+        nextLevelButton = null; // Nullify after destroy
+    }
     this.children.list.filter(c => c.depth === 4 && c.type === 'Text' && (c.text.startsWith('Victory') || c.text.startsWith('Game Over') || c.text.startsWith('Level') || c.text.startsWith('All Data Nodes'))).forEach(c => c.destroy());
     if (droneEliminatedMsg) {
         droneEliminatedMsg.destroy();
