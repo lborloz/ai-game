@@ -106,7 +106,7 @@ function create() {
     // Add physics to the car container
     runner = this.physics.add.existing(car);
     runner.body.setSize(22, 32);
-    runner.body.setCollideWorldBounds(true);
+    runner.body.setCollideWorldBounds(false);
     runner.setPosition(25 * 32 + 16, 25 * 32 + 16);
     this.physics.world.setBounds(0, 0, 1600, 1600);
 
