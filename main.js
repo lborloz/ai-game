@@ -59,55 +59,32 @@ let nextLevelButton = null;
 function preload() {
     // No image loading needed for runner
     this.load.audio('backgroundMusic', 'ai-game.wav');
-    console.log('Audio registered for loading.');
     // Load other sound effects if you have them, e.g.:
     // this.load.audio('moveSound', 'assets/sounds/move.wav');
 }
 
 function create() {
-    console.log('Create function started. gameState:', gameState);
     // If in menu, show menu and return
     if (gameState === 'menu') {
         showMenuScreen.call(this);
         return;
     }
 
-    console.log('Attempting to setup background music...');
+    // Initialize and play background music
+    // Destroy previous BGM instance if it exists (e.g., from a previous game state)
     if (bgm && typeof bgm.destroy === 'function') {
-        try {
-            bgm.destroy();
-            console.log('Previous BGM instance destroyed.');
-        } catch (e) {
-            console.error('Error destroying previous BGM:', e);
-        }
-        bgm = null; // Ensure it's reset
+        bgm.destroy();
+        bgm = null;
     }
 
-    try {
-        bgm = this.sound.add('backgroundMusic', { loop: true, volume: 0.3 });
-        console.log('BGM sound object created successfully.');
-    } catch (e) {
-        console.error('Error creating BGM sound object:', e);
-        bgm = null; // Ensure bgm is null if creation failed
-    }
-
+    bgm = this.sound.add('backgroundMusic', { loop: true, volume: 0.3 });
     if (bgm && !isMuted) {
-        console.log('Attempting to play BGM...');
-        try {
-            // It's possible play() itself returns a promise that could be unhandled
-            // or that an internal error in play() freezes execution without a catchable JS error.
-            bgm.play();
-            console.log('BGM play() command issued.');
-        } catch (error) {
-            console.error('Error calling bgm.play():', error);
-        }
-    } else {
-        if (!bgm) {
-            console.log('BGM object is null, not playing music.');
-        } else if (isMuted) {
-            console.log('Game is muted, not playing BGM.');
-        }
+        bgm.play().catch(function (error) {
+            console.error("Error playing background music in create():", error); // Keep this for critical errors
+        });
     }
+
+    const MAX_PLACEMENT_ATTEMPTS = 5000; // Max attempts for placing nodes/drones
 
     // Background (placeholder: dark rectangle with neon cityscape effect)
     this.add.rectangle(400, 300, 800, 600, 0x181828).setDepth(0);
@@ -319,22 +296,31 @@ function create() {
     muteButton.on('pointerdown', () => {
         isMuted = !isMuted;
         muteButton.setText(isMuted ? '🔇' : '🔊');
-        console.log('Mute toggled. isMuted:', isMuted);
-        // Simplified: We will add pause/resume logic back once initial play works.
-        // For now, if unmuted, music will start on next scene load if create() logic is hit.
-        // Or if already playing and muted, it would just continue silently until actual pause is implemented.
-        // This is to isolate the initial play() call.
-        if (!isMuted && bgm && !bgm.isPlaying && gameState === 'playing') {
-            console.log('Attempting to play BGM after unmute (if not already playing)...');
-            try {
-                bgm.play();
-                console.log('BGM play() command issued after unmute.');
-            } catch (error) {
-                console.error('Error calling bgm.play() after unmute:', error);
+
+        // Attempt to resume audio context on user gesture (unmuting)
+        if (!isMuted && this.sound && typeof this.sound.resumeWebAudio === 'function') {
+            this.sound.resumeWebAudio();
+        }
+
+        if (isMuted) { // Action: Mute
+            if (bgm && typeof bgm.pause === 'function' && bgm.isPlaying) {
+                bgm.pause();
             }
-        } else if (isMuted && bgm && bgm.isPlaying) {
-            console.log('Muting: Pausing BGM.');
-            bgm.pause();
+        } else { // Action: Unmute
+            if (bgm && typeof bgm.resume === 'function') {
+                if (bgm.isPaused) { // Was paused due to mute
+                    // Only resume if game is in a state where music should be playing
+                    if (gameState === 'playing' || (gameState === 'menu' && menuScreen)) { // Check menuScreen to ensure menu is active
+                        bgm.resume().catch(function (error) { console.error("Error resuming music from unmute:", error); });
+                    }
+                } else if (!bgm.isPlaying && (gameState === 'playing' || (gameState === 'menu' && menuScreen))) {
+                    // If it wasn't paused but somehow stopped, and we are in an appropriate state, try to play
+                    bgm.play().catch(function (error) { console.error("Error playing music from unmute (was stopped):", error); });
+                }
+            } else if (bgm && typeof bgm.play === 'function' && !bgm.isPlaying && (gameState === 'playing' || (gameState === 'menu' && menuScreen))) {
+                // Fallback if bgm object exists but no resume (e.g. stopped, not paused)
+                bgm.play().catch(function (error) { console.error("Error playing music from unmute (fallback):", error); });
+            }
         }
     });
 
@@ -516,6 +502,10 @@ function showMenuScreen() {
             strokeThickness: 2
         }).setOrigin(0.5).setDepth(12).setScrollFactor(0);
         btn.on('pointerdown', () => {
+            // Attempt to resume audio context on user gesture
+            if (scene.sound && typeof scene.sound.resumeWebAudio === 'function') {
+                scene.sound.resumeWebAudio();
+            }
             level = i;
             gameState = 'playing';
             menuScreen.destroy();
@@ -536,14 +526,8 @@ function showMenuScreen() {
 }
 
 function showGameOverScreen() {
-    console.log('Game Over. Stopping BGM if playing.');
     if (bgm && typeof bgm.stop === 'function' && bgm.isPlaying) {
-        try {
-            bgm.stop();
-            console.log('BGM stopped in showGameOverScreen.');
-        } catch (e) {
-            console.error('Error stopping BGM in showGameOverScreen:', e);
-        }
+        bgm.stop();
     }
     gameState = 'gameOver';
     if (gameOverSound && !isMuted) gameOverSound.play(); // Play game over sound if available
@@ -595,14 +579,8 @@ function showGameOverScreen() {
 }
 
 function showVictoryScreen() {
-    console.log('Victory. Stopping BGM if playing.');
     if (bgm && typeof bgm.stop === 'function' && bgm.isPlaying) {
-        try {
-            bgm.stop();
-            console.log('BGM stopped in showVictoryScreen.');
-        } catch (e) {
-            console.error('Error stopping BGM in showVictoryScreen:', e);
-        }
+        bgm.stop();
     }
     gameState = 'victory';
     if (victorySound && !isMuted) victorySound.play(); // Play victory sound if available
@@ -685,14 +663,8 @@ function proceedToNextLevel() {
 }
 
 function restartGame() {
-    console.log('Restarting game. Stopping BGM if playing.');
     if (bgm && typeof bgm.stop === 'function' && bgm.isPlaying) {
-        try {
-            bgm.stop();
-            console.log('BGM stopped in restartGame.');
-        } catch (e) {
-            console.error('Error stopping BGM in restartGame:', e);
-        }
+        bgm.stop();
     }
     // Remove the active space bar listener if it exists
     if (activeSpaceListener) {
